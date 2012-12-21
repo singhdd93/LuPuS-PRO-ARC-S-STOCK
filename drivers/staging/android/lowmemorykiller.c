@@ -35,13 +35,16 @@
 #include <linux/oom.h>
 #include <linux/sched.h>
 #include <linux/notifier.h>
+#include <linux/compaction.h>
+
+#define SEC_ADJUST_LMK
 
 #ifdef CONFIG_SWAP
 #include <linux/fs.h>
 #include <linux/swap.h>
 #endif
 
-static uint32_t lowmem_debug_level = 2;
+static uint32_t lowmem_debug_level = 1;
 static int lowmem_adj[6] = {
 	0,
 	1,
@@ -60,7 +63,7 @@ static int lowmem_minfree_size = 4;
 static struct task_struct *lowmem_deathpending;
 static unsigned long lowmem_deathpending_timeout;
 #ifdef CONFIG_SWAP
-static int fudgeswap = 512;
+static int fudgeswap = 0;
 #endif
 
 #define lowmem_print(level, x...)			\
@@ -98,10 +101,26 @@ static int lowmem_shrink(int nr_to_scan, gfp_t gfp_mask)
 	int selected_tasksize = 0;
 	int selected_oom_adj;
 	int array_size = ARRAY_SIZE(lowmem_adj);
-	int other_free = global_page_state(NR_FREE_PAGES);
+	int other_free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
+#ifdef SEC_ADJUST_LMK
+	int other_file = global_page_state(NR_INACTIVE_FILE) +
+						global_page_state(NR_ACTIVE_FILE);
+#else
 	int other_file = global_page_state(NR_FILE_PAGES) -
 						global_page_state(NR_SHMEM);
+#endif
 
+	/*
+	 * If we already have a death outstanding, then
+	 * bail out right away; indicating to vmscan
+	 * that we have nothing further to offer on
+	 * this pass.
+	 *
+	 */
+	if (lowmem_deathpending &&
+	    time_before_eq(jiffies, lowmem_deathpending_timeout))
+		return 0;
+ 
 	/*
 	 * If we already have a death outstanding, then
 	 * bail out right away; indicating to vmscan
@@ -132,12 +151,21 @@ static int lowmem_shrink(int nr_to_scan, gfp_t gfp_mask)
 	if (lowmem_minfree_size < array_size)
 		array_size = lowmem_minfree_size;
 	for (i = 0; i < array_size; i++) {
+#ifdef SEC_ADJUST_LMK
+		if ((other_free + other_file) < lowmem_minfree[i])
+#else
 		if (other_free < lowmem_minfree[i] &&
-				other_file < lowmem_minfree[i]) {
+            other_file < lowmem_minfree[i])
+#endif
+        {
 			min_adj = lowmem_adj[i];
 			break;
 		}
 	}
+#ifdef SEC_ADJUST_LMK
+	if (min_adj == OOM_ADJUST_MAX + 1)
+		return 0;
+#endif
 	if (nr_to_scan > 0)
 		lowmem_print(3, "lowmem_shrink %d, %x, ofree %d %d, ma %d\n",
 			     nr_to_scan, gfp_mask, other_free, other_file,
@@ -146,7 +174,12 @@ static int lowmem_shrink(int nr_to_scan, gfp_t gfp_mask)
 		global_page_state(NR_ACTIVE_FILE) +
 		global_page_state(NR_INACTIVE_ANON) +
 		global_page_state(NR_INACTIVE_FILE);
-	if (nr_to_scan <= 0 || min_adj == OOM_ADJUST_MAX + 1) {
+#ifdef SEC_ADJUST_LMK
+	if (nr_to_scan <= 0)
+#else
+	if (nr_to_scan <= 0 || min_adj == OOM_ADJUST_MAX + 1)
+#endif
+	{
 		lowmem_print(5, "lowmem_shrink %d, %x, return %d\n",
 			     nr_to_scan, gfp_mask, rem);
 		return rem;
@@ -197,6 +230,10 @@ static int lowmem_shrink(int nr_to_scan, gfp_t gfp_mask)
 		force_sig(SIGKILL, selected);
 		rem -= selected_tasksize;
 	}
+#ifdef SEC_ADJUST_LMK
+	else
+		rem = -1;
+#endif
 	lowmem_print(4, "lowmem_shrink %d, %x, return %d\n",
 		     nr_to_scan, gfp_mask, rem);
 	read_unlock(&tasklist_lock);
