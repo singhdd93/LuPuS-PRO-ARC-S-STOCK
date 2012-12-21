@@ -1587,7 +1587,7 @@ static inline void *__vmalloc_node_flags(unsigned long size,
 					int node, gfp_t flags)
 {
 	return __vmalloc_node(size, 1, flags, PAGE_KERNEL,
-				node, __builtin_return_address(0));
+					node, __builtin_return_address(0));
 }
 
 /**
@@ -1607,22 +1607,21 @@ void *vmalloc(unsigned long size)
 EXPORT_SYMBOL(vmalloc);
 
 /**
- *      vzalloc - allocate virtually contiguous memory with zero fill
- *      @size:  allocation size
- *      Allocate enough pages to cover @size from the page level
- *      allocator and map them into contiguous kernel virtual space.
- *      The memory allocated is set to zero.
+ *	vzalloc_zram - allocate virtually contiguous memory with zero fill
+ *	@size:	allocation size
+ *	Allocate enough pages to cover @size from the page level
+ *	allocator and map them into contiguous kernel virtual space.
+ *	The memory allocated is set to zero.
  *
- *      For tight control over page level allocator and protection flags
- *      use __vmalloc() instead.
+ *	For tight control over page level allocator and protection flags
+ *	use __vmalloc() instead.
  */
-void *vzalloc(unsigned long size)
+void *vzalloc_zram(unsigned long size)
 {
 	return __vmalloc_node_flags(size, -1,
-					GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO);
+				GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO);
 }
-EXPORT_SYMBOL(vzalloc);
-
+EXPORT_SYMBOL(vzalloc_zram);
 
 /**
  * vmalloc_user - allocate zeroed virtually contiguous memory for userspace
